@@ -1,0 +1,99 @@
+name: Build electropet firmware
+
+# MeshCore repeater with a pet on the screen: mystery egg, visits, breeding, names.
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "PlatformIO environment (the radio). Default is the Heltec V4 / V4.3 OLED repeater"
+        type: string
+        default: heltec_v4_repeater
+      board:
+        description: "Short name of the radio, used in file names"
+        type: string
+        default: heltec_v4
+      meshcore_ref:
+        description: "MeshCore commit to build on"
+        type: string
+        default: 81dbae592ffad40b4212bc0b37e82b38da08f4bc
+      release_tag:
+        description: "Publish a release with this tag (empty = just build)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PIO_ENV: ${{ inputs.env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Get MeshCore
+        env:
+          MC_REF: ${{ inputs.meshcore_ref }}
+        run: |
+          git init mc
+          cd mc
+          git remote add origin https://github.com/meshcore-dev/MeshCore.git
+          git fetch --depth 1 origin "$MC_REF"
+          git checkout FETCH_HEAD
+
+      - name: Game-rule tests (PC build)
+        run: |
+          set -o pipefail
+          F="-std=c++17 -g -fsanitize=address,undefined -I src -I mc/src -I test -DPET_MYSTERY=1"
+          g++ $F test/breed_sim.cpp src/WolfCore.cpp -o breed_sim && ./breed_sim | tail -3
+          g++ $F test/cross_sim.cpp src/WolfCore.cpp -o cross_sim && ./cross_sim | grep -v "\[alert\]" | tail -4
+          g++ $F test/mystery_sim.cpp src/WolfCore.cpp src/Mystery[A-Z]*.cpp -o mystery_sim && ./mystery_sim | tail -3
+
+      - name: Apply electropet to MeshCore
+        run: python3 tools/apply_electropet.py --meshcore mc
+
+      - name: Build firmware
+        run: |
+          set -o pipefail
+          export PLATFORMIO_BUILD_FLAGS="-DPET_MYSTERY=1"
+          pip install platformio
+          cd mc
+          pio run -e "$PIO_ENV" -t mergebin 2>&1 | tee ../build.log
+
+      - name: Show compile errors
+        if: failure()
+        run: |
+          { grep -E "error|overflow|will not fit|region|FAILED|undefined reference|No such file" build.log; tail -n 12 build.log; } | head -40 | while IFS= read -r l; do
+            echo "::error::${l:0:900}"
+          done
+
+      - name: Collect output
+        run: |
+          mkdir -p out
+          B=mc/.pio/build/"$PIO_ENV"
+          cp $B/firmware-merged.bin out/
+          cp $B/firmware.bin out/
+          git -C mc rev-parse HEAD > out/meshcore_commit.txt
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electropet-${{ inputs.board }}
+          path: out/
+
+      - name: Publish release
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+          BOARD: ${{ inputs.board }}
+        run: |
+          P="electropet-$BOARD"
+          cp out/firmware-merged.bin "$P-merged.bin"; cp out/firmware.bin "$P-update.bin"
+          gh release create "$TAG" "$P-merged.bin" "$P-update.bin" --title "electropet repeater ($BOARD)" \
+            --notes "MeshCore repeater with a pet. Full flash: $P-merged.bin at 0x0 (erase first). Update: $P-update.bin."
