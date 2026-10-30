@@ -14,7 +14,7 @@
 #define PET_FIRE       0     // fire-breathing kind: 0 dragon's breath, 1 phoenix flame
 #define PET_MAGIC      0     // sparkle kind: 0 unicorn rainbow + stars, 1 kitsune foxfire, 2 griffin feathers
 #define PET_EGG_STYLE  0     // shell look: 0 speckled, 1 scaly, 2 flames
-#define PET_EGG        0     // 1 = starts as an egg that hatches after 24..48 hours powered on
+#define PET_EGG        0     // 1 = starts as an egg that hatches after 2..48 hours powered on
 #define PET_INSECT     0     // 1 = an insect (own scene, own life cycle)
 #define PET_HIDDEN_FROM 0    // months during which the pet stays put (a chrysalis does not go visiting)
 #define PET_HIDDEN_TO   0

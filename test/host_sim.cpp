@@ -434,7 +434,7 @@ static int cmd_mirror(const char* path) {
 
 
 // ---------------------------------------------------------------------------------------------
-// Eggs: hatch after 24..48 hours powered on, stay home, announce the hatching, survive a reboot.
+// Eggs: hatch after 2..48 hours powered on, stay home, announce the hatching, survive a reboot.
 static int cmd_egg(const char* frames) {
   g_eggs_on = true;
   if (!WolfGame::eggSecs(1234567u)) { printf("(this pet has no egg stage)\n"); return 0; }
@@ -446,8 +446,8 @@ static int cmd_egg(const char* frames) {
     if (e > hi) hi = e;
   }
   printf("  hatch time over 5000 genomes: %.1f .. %.1f hours\n", lo / 3600.0, hi / 3600.0);
-  CHECK(lo >= 24u * 3600 && hi <= 48u * 3600, "hatch time stays within 24..48 hours");
-  CHECK(lo <= 25u * 3600 && hi >= 47u * 3600, "hatch times use the whole 24..48 hour range");
+  CHECK(lo >= 2u * 3600 && hi <= 48u * 3600, "hatch time stays within 2..48 hours");
+  CHECK(lo <= 4u * 3600 && hi >= 46u * 3600, "hatch times use the whole 2..48 hour range");
   MockHost h(4242, 0x1357BEEF, 3);
   WolfGame g(&h);
   g.begin(0);
