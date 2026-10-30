@@ -34,6 +34,8 @@ extern const PaStage* const* art_pet_horse();
 uint8_t g_pet_reg[72 * 60];
 uint8_t g_pet_lit[72 * 60];
 uint8_t g_pet_bits[((72 + 7) / 8) * 60];
+uint8_t g_pet_up[72 * 60];
+uint8_t g_pet_dn[72 * 60];
 PetSceneBase* makePetScene(uint8_t sp, WolfGame* g) {
   switch (sp) {
     case 0: return make_pet_wolf(g);

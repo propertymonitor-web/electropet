@@ -13,6 +13,8 @@ import math, sys, os
 from PIL import Image, ImageDraw
 
 SS = 6  # supersampling factor
+SMOOTH = False  # round off the silhouettes (sharp points are kept)
+LEG_BUILDER = None   # species with a skeleton for their legs set this (see organic.py)
 
 PAD = 8                    # blank rows above the design so the head can tip up (howl)
 DESIGN_W, DESIGN_H = 64, 44 + PAD
@@ -98,6 +100,36 @@ def _rotl(x, pivot, ang):
     return out
 
 
+
+def smooth_poly(pts, iters=2, keep_deg=75.0):
+    """Round off a polygon (Chaikin corner cutting) but keep its sharp points (ear tips, claws, horns, spikes)."""
+    pts = [tuple(p) for p in pts]
+    if len(pts) < 4:
+        return pts
+    for _ in range(iters):
+        n = len(pts)
+        keep = []
+        for i in range(n):
+            a, b, c = pts[i - 1], pts[i], pts[(i + 1) % n]
+            v1 = (a[0] - b[0], a[1] - b[1]); v2 = (c[0] - b[0], c[1] - b[1])
+            l1 = math.hypot(*v1) or 1e-9; l2 = math.hypot(*v2) or 1e-9
+            cosang = max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / (l1 * l2)))
+            keep.append(math.degrees(math.acos(cosang)) < keep_deg)       # a sharp point: interior angle under keep_deg
+        out = []
+        for i in range(n):
+            b, c = pts[i], pts[(i + 1) % n]
+            if keep[i]:
+                out.append(b)
+            if keep[i] and keep[(i + 1) % n]:
+                continue
+            if not keep[i]:
+                out.append((0.75 * b[0] + 0.25 * c[0], 0.75 * b[1] + 0.25 * c[1]))
+            if not keep[(i + 1) % n]:
+                out.append((0.25 * b[0] + 0.75 * c[0], 0.25 * b[1] + 0.75 * c[1]))
+        pts = out
+    return pts
+
+
 class Stage:
     def __init__(self, name, k, hk, lk):
         self.name, self.k, self.hk, self.lk = name, k, hk, lk
@@ -129,7 +161,7 @@ class Stage:
                 pts = [self.tx(p, head=head, leg=leg) for p in poly[1]]
                 d.line([(x * SS, y * SS) for x, y in pts], fill=0, width=max(1, int(round(poly[2] * self.k * SS))))
                 continue
-            pts = [self.tx(p, head=head, leg=leg) for p in poly]
+            pts = [self.tx(p, head=head, leg=leg) for p in (smooth_poly(poly) if SMOOTH else poly)]
             d.polygon([(x * SS, y * SS) for x, y in pts], fill=255)
         return self.finish(im)
 
@@ -193,6 +225,8 @@ def legs_for_frame(frame, lk):
             ang = a + phase
             return (round(3.4 * math.sin(ang)), round(2.4 * max(0.0, math.cos(ang))))
         offs = [sw(0), sw(math.pi), sw(math.pi), sw(0)]  # nh, fh, nf, ff
+    if LEG_BUILDER:
+        return LEG_BUILDER(offs, lk)
     spec = [(LEG_X[0], offs[0], True), (LEG_X[1], offs[1], False), (LEG_X[2], offs[2], True), (LEG_X[3], offs[3], False)]
     return [leg_poly(hx, o[0], o[1], lk, near) for hx, o, near in spec]
 
@@ -239,8 +273,8 @@ def main(out_path):
         down_poly = _rotl(HEAD_SIDE, NECK, ang_down)
         add("head0", st.render(_pl(HEAD_SIDE), head=True))
         add("head1", st.render(down_poly, head=True))
-        add("head2", st.render([HEAD_FRONT], head=True))
-        add("head3", st.render([HEAD_FRONT], head=True))
+        add("head2", st.render(_pl(HEAD_FRONT), head=True))
+        add("head3", st.render(_pl(HEAD_FRONT), head=True))
         ang_up = math.radians(-32)
         add("head4", st.render(_rotl(HEAD_SIDE, NECK, ang_up), head=True))
 
@@ -305,10 +339,14 @@ if __name__ == "__main__":
     import argparse, importlib
     ap = argparse.ArgumentParser()
     ap.add_argument("--species", default="wolf")
+    ap.add_argument("--old", action="store_true", help="the original polygon wolf")
     ap.add_argument("out", nargs="?")
     a = ap.parse_args()
     here = os.path.dirname(os.path.abspath(__file__))
-    if a.species != "wolf":
-        sys.path.insert(0, here)
+    sys.path.insert(0, here)
+    organic = importlib.import_module("species_organic")
+    if not a.old and hasattr(organic, "apply_" + a.species):
+        getattr(organic, "apply_" + a.species)(globals())          # drawn from a skeleton (organic.py)
+    elif a.species != "wolf":
         getattr(importlib.import_module("pet_species"), "apply_" + a.species)(globals())
     main(a.out or os.path.join(here, "..", "src", "WolfArt_%s.h" % a.species))

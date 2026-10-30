@@ -87,6 +87,10 @@
   extern uint8_t g_pet_reg[MAX_CW * MAX_CH];
   extern uint8_t g_pet_lit[MAX_CW * MAX_CH];
   extern uint8_t g_pet_bits[((MAX_CW + 7) / 8) * MAX_CH];
+  extern uint8_t g_pet_up[MAX_CW * MAX_CH];
+  extern uint8_t g_pet_dn[MAX_CW * MAX_CH];
+  #define g_up   g_pet_up
+  #define g_dn   g_pet_dn
   #define g_reg  g_pet_reg
   #define g_lit  g_pet_lit
   #define g_bits g_pet_bits
@@ -128,6 +132,8 @@ enum Kind   : uint8_t { K_BODY, K_LEG, K_HEAD_SIDE, K_HEAD_FRONT, K_EAR, K_TAIL 
 static uint8_t g_reg[MAX_CW * MAX_CH];
 static uint8_t g_lit[MAX_CW * MAX_CH];
 static uint8_t g_bits[((MAX_CW + 7) / 8) * MAX_CH];
+static uint8_t g_up[MAX_CW * MAX_CH];     // pixels from the top edge of the shape, straight up (1 at the edge)
+static uint8_t g_dn[MAX_CW * MAX_CH];     // and down to the bottom edge
 #endif
 static int g_ch;     // canvas height of the sprite being built
 
@@ -161,6 +167,24 @@ static void stamp(const WolfPart& p, int cw, bool mirror, Kind kind, int dy = 0)
 
 static inline bool inside(int x, int y, int cw, int ch) {
   return x >= 0 && x < cw && y >= 0 && y < ch && g_reg[y * cw + x] != R_NONE;
+}
+
+// 4 x 4 ordered-dither thresholds (0..15)
+static const uint8_t bayer4[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
+
+// is the coat dot at (x, y) lit?  `level` 0..3 is the coat's own darkness; `up` and `dn` place the pixel within its shape.
+static inline bool coatDot(uint8_t level, int x, int y, int up, int dn, uint8_t region) {
+  static const int8_t base16[4] = { 0, 4, 8, 12 };                    // coat tone in sixteenths: bare, light, medium, dark
+  int tone = base16[level & 3] * 4;                                    // in 64ths
+  int span = up + dn;                                                  // thickness of the shape here
+  if (span >= 4) {                                                     // thin things (a whisker, a toe) are left as they are
+    int u = (up * 2 - 1) * 64 / (span * 2);                            // 0 at the top edge .. 64 at the bottom edge
+    int shade = (u - 26) * 20 / 64;                                    // -8 .. +12 (64ths): lighter on top, darker underneath
+    if (level == 0) shade = shade > 0 ? shade * 3 / 5 : 0;             // a bare coat only gets a faint belly shadow
+    tone += shade;
+  }
+  if (region == R_LEG && level != 0) tone += 5;                        // legs read a little darker than the body: they are in shadow
+  return tone > (int)bayer4[y & 3][x & 3] * 4 + 2;
 }
 
 static inline bool pattern(uint8_t level, int x, int y) {
@@ -222,14 +246,22 @@ int wolfDrawSprite(DisplayDriver& d, uint32_t genome, uint8_t stage, int x, int 
     }
   }
 
-  // coat fill + outline
+  // coat fill + outline.  The coat's own tone (its genes) is shaded as if lit from above: a little lighter along the
+  // back and darker toward the belly, the underside of the legs and the chin, so the animal looks round, not flat.
+  // The tone is turned into dots with an ordered-dither matrix, which keeps the gradient smooth on a 1-bit screen.
+  for (int px = 0; px < cw; px++) {                    // how far down each pixel is from the top of its vertical run, and up from the bottom
+    int run = 0;
+    for (int y = 0; y < ch; y++) { run = g_reg[y * cw + px] != R_NONE ? run + 1 : 0; g_up[y * cw + px] = (uint8_t)(run > 255 ? 255 : run); }
+    run = 0;
+    for (int y = ch - 1; y >= 0; y--) { run = g_reg[y * cw + px] != R_NONE ? run + 1 : 0; g_dn[y * cw + px] = (uint8_t)(run > 255 ? 255 : run); }
+  }
   for (int y = 0; y < ch; y++) {
     for (int px = 0; px < cw; px++) {
       uint8_t r = g_reg[y * cw + px];
       if (r == R_NONE) continue;
       bool edge = !inside(px - 1, y, cw, ch) || !inside(px + 1, y, cw, ch) ||
                   !inside(px, y - 1, cw, ch) || !inside(px, y + 1, cw, ch);
-      g_lit[y * cw + px] = edge || pattern(levelFor(r, t), px, y);
+      g_lit[y * cw + px] = edge || coatDot(levelFor(r, t), px, y, g_up[y * cw + px], g_dn[y * cw + px], r);
     }
   }
 
